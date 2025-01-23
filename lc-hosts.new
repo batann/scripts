@@ -1,0 +1,109 @@
+#!/bin/bash
+# vim:fileencoding=utf-8:foldmethod=marker
+
+#{{{ >>>   Variables
+HOS1="/etc/hosts.1"
+HOS2="/etc/hosts.2"
+HOS3="/etc/hosts.3"
+SIGN_FILE="/home/batan/.lc-sign"
+STATUS=$(cat $SIGN_FILE |grep block|cut -c 12-13)
+DOMAINS=$(cat /etc/hosts |wc -l)
+
+
+#}}}
+#{{{ >>>   Homework
+
+# Ensure .lc-sign exists before reading
+if [[ ! -f "$SIGN_FILE" ]]; then
+    touch "$SIGN_FILE"
+	echo "blocking = 0" >> $SIGN_FILE
+echo -e "\033[31m$SIG_FILE \033[34mcreated.\033[0m"
+echo -e "\033[34mCurrent status: \033[31m not blocking.\033[0m"
+
+fi
+
+#Esure that host.1 host.2 host.3 are in place
+#host.1 negative
+#host2 positiv
+#host.3 empty
+
+if [[ ! -f $HOS1 ]] && [[ ! -f $HOS2 ]];
+then
+echo -e "\033[34mCreating hosts files: 1 and 2.\033[0m"
+	git clone https://github.com/batann/hos >/dev/null 2>&1
+	sudo mv /etc/hosts /etc/hosts.original
+	sudo mv /home/batan/hos/hosts.1 /etc/hosts
+	sudo mv /home/batan/hos/hosts.2 /etc/hosts.2
+	sudo trash /home/batan/hos
+	read -n1 -p "Enter [[ANY]] to continue..." xxx
+fi
+
+#}}}
+#{{{ >>>   functions
+
+display_status(){
+if [[ $STATUS == 0 ]]; then 
+	echo -e "\033[34mYou are \033[31mnot blocking \033[34m with your current hosts file.\033[0m"
+else
+	echo -e "\033[34mYou are currently \033[31mblocking \033[34m $DOMAINS with the hosts file\033[0m" 
+fi
+}
+
+block(){
+sudo mv /etc/hosts /etc/hosts.1
+sudo mv /etc/hosts.2 /etc/hosts
+}
+
+un_block(){
+sudo mv /etc/hosts /etc/hosts.2
+sudo mv /etc/hosts.1 /etc/hosts
+}
+
+
+set_status_blocking(){
+	sed -i 's/blocking = [0-9]/blocking = 1/g' $SIGN_FILE
+}
+set_status_not_blocking(){
+sed -i 's/blocking = [0-9]/blocking = 0/g' $SIGN_FILE
+}
+
+#}}}
+#{{{ >>>   main script
+clear
+display_status
+echo -e "\033[34mJust checking, or do you want to block some domains?\033[0m"
+echo -e "\033[37m1\033[32m) \033[33m>>> \033[37mBlock\033[0m"
+echo -e "\033[37m2\033[32m) \033[33m>>> \033[37mUnblock\033[0m"
+echo -e "\033[37m3\033[32m) \033[33m>>> \033[37mKeep as is and Exit\033[0m"
+
+read -n1 tak
+clear
+if [[ $tak == 1 ]] && [[ $( ls /etc/hosts.[0-9]|cut -c 12-13) == 2 ]]; then
+
+block
+set_status_blocking
+display_status
+
+elif [[ $tak == 1 ]] &&  [[ $( ls /etc/hosts.[0-9]|cut -c 12-13) == 1 ]]; then
+echo -e "\033[34mYou are already blocking \033[31m$DOMAINS\033[0m"
+echo -e "\033[34mExiting, nothing to do!!!\033[0m"
+
+elif [[ $tak == 2 ]] &&  [[ $( ls /etc/hosts.[0-9]|cut -c 12-13) == 2 ]]; then
+echo -e "\033[34mYou are already \033[31mNOT \033[34mblocking \033[31m$DOMAINS\033[0m"
+echo -e "\033[34mExiting, nothing to do!!!\033[0m"
+	
+elif [[ $tak == 2 ]] &&  [[ $( ls /etc/hosts.[0-9]|cut -c 12-13) == 1 ]]; then
+
+	un_block
+	set_status_not_blocking
+	display_status
+
+elif [[ $tak == 3 ]]; then
+clear
+display_status
+echo "Exiting..."
+exit 0
+fi
+
+#}}}
+
