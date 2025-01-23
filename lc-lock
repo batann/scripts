@@ -1,0 +1,43 @@
+#!/bin/bash
+
+
+TTASK=$(echo -e "PENDING TASKS:" && echo -e "===============" &&  task)
+
+REMINDER="$TTASK"
+
+
+#REMINDER="Remember to stay hydrated!"
+
+# Capture a screenshot and blur it
+scrot /tmp/screen_locked.png
+convert /tmp/screen_locked.png -blur 0x8 /tmp/screen_locked.png
+
+# Detect screen resolution
+SCREEN_INFO=$(xrandr | grep ' connected' | awk '{print $3}')
+LEFT_SCREEN_WIDTH=1920
+RIGHT_SCREEN_WIDTH=1920
+SCREEN_HEIGHT=1080
+
+if [[ $SCREEN_INFO =~ ([0-9]+)x([0-9]+)\+([0-9]+)\+([0-9]+) ]]; then
+    LEFT_SCREEN_WIDTH=${BASH_REMATCH[1]}
+    SCREEN_HEIGHT=${BASH_REMATCH[2]}
+fi
+
+# Calculate positions for reminders on both screens
+LEFT_SCREEN_CENTER="$((LEFT_SCREEN_WIDTH / 2)),$((SCREEN_HEIGHT / 2))"
+RIGHT_SCREEN_CENTER="$((LEFT_SCREEN_WIDTH + RIGHT_SCREEN_WIDTH / 2)),$((SCREEN_HEIGHT / 2))"
+
+# Add reminder to both screens
+convert /tmp/screen_locked.png \
+    -gravity northwest -font Arial -pointsize 48 -fill white \
+    -annotate +$((LEFT_SCREEN_WIDTH / 4))+$((SCREEN_HEIGHT / 4)) "$REMINDER" \
+    -gravity northwest -font Arial -pointsize 48 -fill white \
+    -annotate +$((LEFT_SCREEN_WIDTH + RIGHT_SCREEN_WIDTH / 4))+$((SCREEN_HEIGHT / 4)) "$REMINDER" \
+    /tmp/screen_locked_with_reminder.png
+
+# Lock the screen with the final image
+i3lock -i /tmp/screen_locked_with_reminder.png
+
+# Clean up
+rm /tmp/screen_locked.png /tmp/screen_locked_with_reminder.png
+

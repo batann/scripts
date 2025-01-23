@@ -1,0 +1,543 @@
+#!/bin/sh
+
+## live-tools(7) - System Support Scripts
+## Copyright (C) 2013 Richard Nelson <unixabg@gmail.com>
+##
+## This program comes with ABSOLUTELY NO WARRANTY; for details see COPYING.
+## This is free software, and you are welcome to redistribute it
+## under certain conditions; see COPYING for details.
+
+
+set -e
+
+# Defaults
+_VERSION="7.6"
+_RELEASE=".0"
+
+_URL="live.debian.net::${_VERSION}/ARCH/web"
+
+# Select to media to install from rsync or booted Debian Live image.
+_RSYNCINSTALL="Network rsync server."
+
+# Select the default live image config type.
+_CONFIGTYPE="gnome-desktop"
+
+#_ARCH - amd64 i386-486 i386-686
+#_FLAVOUR - set from _ARCH selection and configured as 1 for 486 and 2 for 686
+_ARCH="amd64"
+_FLAVOUR=""
+
+_NONFREE="No, do not include non-free."
+
+_TARGET="/dev/sda"
+
+# Custom boot menu
+_BOOTMENU="No, include the default menu."
+
+# Persistence settings
+_PERSISTENCE="No, do not make persistence."
+_SIZE="250MB"
+
+# Dependencies
+if [ "$(id -u)" -ne "0" ]
+then
+	echo "E: You need to be the root user to run this script.";
+
+	exit 1
+fi
+
+if [ ! -e /sbin/parted ]
+then
+	echo "E: /sbin/parted - no such file"
+	echo "I: On Debian based systems, parted can be installed with:"
+	echo "I:   apt-get install parted"
+
+	exit 1
+fi
+
+if [ ! -e /usr/bin/extlinux ]
+then
+	echo "E: /usr/bin/extlinux - no such file"
+	echo "I: On Debian based systems, extlinux can be installed with:"
+	echo "I:   apt-get install extlinux"
+
+	exit 1
+fi
+
+if [ ! -e /usr/bin/rsync ]
+then
+	echo "E: /usr/bin/rsync - no such file"
+	echo "I: On Debian based systems, rsync can be installed with:"
+	echo "I:   apt-get install rsync"
+
+	exit 1
+fi
+
+if [ ! -e /usr/share/syslinux/themes/debian/extlinux/splash.png ]
+then
+	echo "E: /usr/share/syslinux/themes/debian/extlinux/splash.png - no such file"
+	echo "I: On Debian based systems, splash.png image can be installed with:"
+	echo "I:   apt-get install syslinux-themes-debian"
+
+	exit 1
+fi
+
+if [ ! -e /usr/lib/syslinux/vesamenu.c32 ]
+then
+	echo "E: /usr/lib/syslinux/vesamenu.c32 - no such file"
+	echo "I: On Debian based systems, vesamenu.c32 can be installed with:"
+	echo "I:   apt-get install syslinux-common"
+
+	exit 1
+fi
+
+if [ ! -e /boot/memtest86+.bin ]
+then
+	echo "E: /boot/memtest86+.bin - no such file"
+	echo "I: On Debian based systems, memtest86+ can be installed with:"
+	echo "I:   apt-get install memtest86+"
+
+	exit 1
+fi
+
+cat << EOF
+######################################################
+		live-medium-install
+######################################################
+
+######################################################
+By default the script will attempt to install from a
+network rsync server. If you would like to attempt to
+install from the Debian Live media you have booted,
+please enter the text you would want in the boot menu
+for the version of the install.
+
+Select the media source to attempt the firmware install.
+(default: ${_RSYNCINSTALL})
+
+ Network rsync server.
+ Debian Live media menu text example.
+
+EOF
+
+# Ask for _RSYNCINSTALL
+echo -n ": "
+read _READ
+
+_RSYNCINSTALL=${_READ:-${_RSYNCINSTALL}}
+
+# This if statement is a sentry to guard prompts needed for rsync install.
+if [ "${_RSYNCINSTALL}" = "Network rsync server." ]
+then
+	cat << EOF
+
+######################################################
+Please enter the image config type to download.
+(default: ${_CONFIGTYPE})
+
+ gnome-desktop
+ kde-desktop
+ lxde-desktop
+ xfce-desktop
+ standard
+ rescue
+
+EOF
+
+	# Ask for _CONFIGTYPE
+	echo -n ": "
+	read _READ
+
+	_CONFIGTYPE=${_READ:-${_CONFIGTYPE}}
+
+	cat << EOF
+
+######################################################
+Please enter the architecture you would like to install?
+(default: ${_ARCH})
+
+ amd64
+ i386-486
+ i386-686
+
+EOF
+
+	# Ask for _ARCH
+	echo -n ": "
+	read _READ
+
+	_ARCH=${_READ:-${_ARCH}}
+
+	# Configure the _URL architecture and set _FLAVOUR on i386
+	case "${_ARCH}" in
+		'amd64')
+			_URL=$(echo ${_URL} | sed s@ARCH@amd64@)
+			;;
+
+		'i386-486')
+			_URL=$(echo ${_URL} | sed s@ARCH@i386@)
+			_ARCH="i386"
+			_FLAVOUR="1"
+			;;
+
+		'i386-686')
+			_URL=$(echo ${_URL} | sed s@ARCH@i386@)
+			_ARCH="i386"
+			_FLAVOUR="2"
+			;;
+
+		*)
+			echo "Invalid architecture selection of ${_ARCH}, aborting."
+			exit 1
+			;;
+	esac
+
+	cat << EOF
+
+######################################################
+Do you want to use images which include the non-free
+archive areas? Please enter 'Yes, include non-free.'
+(default: ${_NONFREE})
+
+EOF
+
+	# Ask for _NONFREE
+	echo -n ": "
+	read _READ
+
+	_NONFREE=${_READ:-${_NONFREE}}
+
+	# Configure _URL and _CONFIGTYPE to include non-free
+	case "${_NONFREE}" in
+		'No, do not include non-free.')
+			;;
+
+		'Yes, include non-free.')
+			_URL=$(echo ${_URL} | sed s@${_VERSION}@${_VERSION}+nonfree@)
+			_CONFIGTYPE="${_CONFIGTYPE}+nonfree"
+			;;
+
+		*)
+			echo "Invalid non-free selection of ${_NONFREE}, aborting."
+			exit 1
+			;;
+	esac
+
+	case "${_CONFIGTYPE}" in
+		gnome-desktop|kde-desktop|lxde-desktop|xfce-desktop|standard|rescue|gnome-desktop+nonfree|kde-desktop+nonfree|lxde-desktop+nonfree|xfce-desktop+nonfree|standard+nonfree|rescue+nonfree)
+			_FILES="debian-live-${_VERSION}${_RELEASE}-${_ARCH}-${_CONFIGTYPE}"
+			;;
+
+		*)
+			echo "Invalid config type selection of ${_CONFIGTYPE}, aborting."
+			exit 1
+			;;
+	esac
+
+	cat << EOF
+
+######################################################
+Do you have a custom boot folder to rsync?
+Please enter: 'Yes, rsync boot menu.'
+(default: ${_BOOTMENU})
+
+EOF
+
+	# Ask for _BOOTMENU
+	echo -n ": "
+	read _READ
+
+	_BOOTMENU=${_READ:-${_BOOTMENU}}
+
+	cat << EOF
+
+######################################################
+Please enter URL to download the ${_FILES} from
+(default: ${_URL})
+
+EOF
+
+	# Ask for URL
+	echo -n ": "
+	read _READ
+
+	_URL="${_READ:-${_URL}}"
+
+# This is the fi for the if statement sentry to guard prompts needed for rsync install.
+fi
+
+cat << EOF
+
+######################################################
+Do you want to use persistence option?
+Please enter: 'Yes, I want persistence.'
+(default: ${_PERSISTENCE})
+
+EOF
+
+# Ask for _PERSISTENCE
+echo -n ": "
+read _READ
+
+_PERSISTENCE=${_READ:-${_PERSISTENCE}}
+
+case "${_PERSISTENCE}" in
+	'Yes, I want persistence.')
+		echo "What size? (default: ${_SIZE})"
+		# Ask for _SIZE
+
+		echo -n ": "
+		read _READ
+		_SIZE=${_READ:-${_SIZE}}
+
+		;;
+
+	'No, do not make persistence.')
+		;;
+
+	*)
+		echo "Invalid persistence selection of ${_PERSISTENCE} , abort."
+		exit 1
+		;;
+esac
+
+# Display warning
+# Display partitions
+cat << EOF
+
+######################################################
+WARNING: This will erase all data on the target device
+######################################################
+
+-------------------------------------------------------------------------------
+$(blkid | sort)
+-------------------------------------------------------------------------------
+
+EOF
+
+# Ask for target device
+echo -n "Please enter block device to install system to (default: ${_TARGET}): "
+read _READ
+
+_TARGET="${_READ:-${_TARGET}}"
+
+if [ ! -b "${_TARGET}" ]
+then
+	echo "E: ${_TARGET} not a block device, aborting."
+	exit 1
+fi
+
+cat << EOF
+
+#########################################################
+WARNING: This will erase all data on the ${_TARGET} device
+#########################################################
+
+You are about to do something potentially harmful.
+To continue type in the phrase 'Yes, do as I say!'
+EOF
+
+echo -n ": "
+read _CONTINUE
+
+case "${_CONTINUE}" in
+	'Yes, do as I say!')
+
+		;;
+
+	*)
+		echo "Abort."
+
+		exit 1
+		;;
+esac
+
+# Zero fill just a bit
+echo "Starting dd command for short zero fill..."
+dd if=/dev/zero of=${_TARGET} bs=1024 count=1024
+
+# Make a single partition
+echo "Starting parted command to make label and partition..."
+#parted -s -a optimal ${_TARGET} mklabel gpt -- mkpart primary ext4 1 -1
+#parted -s -a optimal ${_TARGET} mklabel msdos -- mkpart primary ext4 1 3000
+#parted -s -a optimal ${_TARGET} -- mkpart primary ext4 3000 -1
+#parted -s -a optimal ${_TARGET} mklabel msdos -- mkpart primary ext4 1 -1
+# Example of 10gb and swap.
+#parted -s -a optimal ${_TARGET} mklabel msdos -- mkpart primary ext4 1 10000
+#parted -s -a optimal ${_TARGET} -- mkpart primary linux-swap 10000 12000
+
+if [ "${_PERSISTENCE}" = "Yes, I want persistence." ]
+then
+	echo "Creating install partition and reserving persistence space on drive."
+	parted -s -a optimal ${_TARGET} mklabel msdos -- mkpart primary ext4 ${_SIZE}+1 -1
+
+	echo "Now adding partition for persistence."
+	parted -s -a optimal ${_TARGET} -- mkpart primary ext4 1 ${_SIZE}
+	mkfs.ext4 -L persistence ${_TARGET}2
+	mkdir /mnt2
+	mount ${_TARGET}2 /mnt2
+	echo "/ union" >> /mnt2/persistence.conf
+	umount /mnt2
+	rmdir /mnt2
+else
+	echo "Creating install partition on drive."
+	parted -s -a optimal ${_TARGET} mklabel msdos -- mkpart primary ext4 1 -1
+fi
+
+# Set the block device to boot.
+echo "Starting parted command to enable boot..."
+parted -s ${_TARGET} --  set 1 boot on
+
+# Make new filesystem on the new partitions.
+echo "Making filesystem..."
+mkfs.ext4 -L Firmware ${_TARGET}1
+#mkfs.ext4 -L persistence ${_TARGET}2
+
+# Mount the target filesystem
+echo "Mounting file system to allow saving of webboot files..."
+mount ${_TARGET}1 /mnt
+
+# Create the directory to save webboot files
+echo "Creating /live dir..."
+mkdir -p /mnt/live
+
+if [ "${_RSYNCINSTALL}" = "Network rsync server." ]
+then
+	# Download the webboot files from server
+	echo "Downloading webboot files..."
+
+	# Rsync the files to the target machine.
+	rsync -av --progress ${_URL}/${_FILES}.vmlinuz${_FLAVOUR} /mnt/live/
+	rsync -av --progress ${_URL}/${_FILES}.initrd${_FLAVOUR}.img /mnt/live/
+	rsync -av --progress ${_URL}/${_FILES}.squashfs /mnt/live/
+
+	# Renaming files
+	mv /mnt/live/debian-live-*.vmlinuz${_FLAVOUR} /mnt/live/vmlinuz
+	mv /mnt/live/debian-live-*.initrd${_FLAVOUR}.img /mnt/live/initrd.img
+	mv /mnt/live/debian-live-*.squashfs /mnt/live/filesystem.squashfs
+else
+	# Copy files from live media
+	echo "Copying files..."
+
+	# Determine which flavor from uname and rsync appropriate files.
+	# Rsync the files to the target machine.
+	if $(echo $(uname -r) | grep -qs "486")
+	then
+		_FLAVOUR="1"
+	elif $(echo $(uname -r) | grep -qs "686")
+	then
+		_FLAVOUR="2"
+	else
+		# amd64 live media.
+		_FLAVOUR=""
+	fi
+	rsync -av --progress /lib/live/mount/medium/live/vmlinuz${_FLAVOUR} /mnt/live/vmlinuz
+	rsync -av --progress /lib/live/mount/medium/live/initrd${_FLAVOUR}.img /mnt/live/initrd.img
+	rsync -av --progress /lib/live/mount/medium/live/filesystem.squashfs /mnt/live/filesystem.squashfs
+fi
+
+# Writing mbr
+# FIXME: needs update for syslinux 6.0
+dd if=/usr/lib/extlinux/mbr.bin of="${_TARGET}" bs=440 count=1 conv=notrunc
+
+if [ "${_BOOTMENU}" = "Yes, rsync boot menu." ]
+then
+	# Download the boot and menu files from server
+	echo "Downloading boot and menu files..."
+
+	# Rsync the files to the target machine.
+	rsync -av --progress ${_URL}/boot /mnt/
+else
+	# Configuring bootloader
+	mkdir -p /mnt/boot/extlinux
+
+	cp /usr/lib/syslinux/vesamenu.c32 /mnt/boot/extlinux/
+	cp /usr/share/syslinux/themes/debian/extlinux/splash.png /mnt/boot/extlinux/
+	cp /boot/memtest86+.bin /mnt/boot/
+
+	cat > /mnt/boot/extlinux/extlinux.conf << EOF
+default live
+prompt 0
+timeout 50
+
+default vesamenu.c32
+menu background splash.png
+EOF
+
+	if [ "${_RSYNCINSTALL}" = "Network rsync server." ]
+	then
+		cat >> /mnt/boot/extlinux/extlinux.conf << EOF
+menu title Debian Linux Firmware Version ${_VERSION}
+EOF
+	else
+		cat >> /mnt/boot/extlinux/extlinux.conf << EOF
+menu title Debian Linux Firmware Version ${_RSYNCINSTALL}
+EOF
+	fi
+
+	cat >> /mnt/boot/extlinux/extlinux.conf << EOF
+
+menu separator
+menu separator
+menu separator
+menu separator
+menu separator
+menu separator
+menu separator
+menu color title	* #FFFFFFFF *
+menu color border	* #00000000 #00000000 none
+menu color sel		* #ffffffff #76a1d0ff *
+menu color hotsel	1;7;37;40 #ffffffff #76a1d0ff *
+menu color tabmsg	* #ffffffff #00000000 *
+menu color help		37;40 #ffdddd00 #00000000 none
+menu vshift 9
+menu rows 10
+menu helpmsgrow 15
+# The command line must be at least one line from the bottom.
+menu cmdlinerow 16
+menu timeoutrow 16
+menu tabmsgrow 18
+menu tabmsg Press ENTER to boot or TAB to edit a menu entry
+
+
+label live
+	menu label ^Live
+	menu default
+	linux /live/vmlinuz
+	initrd /live/initrd.img
+EOF
+
+	if [ "${_PERSISTENCE}" = "Yes, I want persistence." ]
+	then
+		cat >> /mnt/boot/extlinux/extlinux.conf << EOF
+	append boot=live config vga=normal video=vesa quiet splash persistence
+EOF
+	else
+		cat >> /mnt/boot/extlinux/extlinux.conf << EOF
+	append boot=live config vga=normal video=vesa quiet splash
+EOF
+	fi
+
+	cat >> /mnt/boot/extlinux/extlinux.conf << EOF
+
+label live-failsafe
+	menu label Live (failsafe)
+	linux /live/vmlinuz
+	initrd /live/initrd.img
+	append boot=live config memtest noapic noapm nodma nomce nolapic nomodeset nosmp nosplash vga=normal
+
+label memtest
+	menu label Memory Diagnostic Tool (memtest86+)
+	linux /boot/memtest86+.bin
+EOF
+fi
+
+# Writing bootloader
+extlinux --install /mnt/boot/extlinux
+
+# Sync and umount
+echo "Cleanup with sync and umount..."
+umount /mnt
+sync
+
+echo "Please halt your machine and boot up to your live firmware."
